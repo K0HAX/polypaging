@@ -1,0 +1,14 @@
+[package]
+name = "polypaging"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+#crate-type = ["dylib"]
+
+[dependencies]
+ascii = "1.1.0"
+byteorder = "1.4.3"
+clap = { version = "4.2.4", features = ["derive", "env", "unicode", "wrap_help"] }
+log = "0.4.17"
+tokio = { version = "1.27.0", features = ["full"] }

@@ -1,4 +1,3 @@
-#![doc(html_no_source)]
 use ascii;
 use clap::ValueEnum;
 use log;

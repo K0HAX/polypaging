@@ -2,6 +2,11 @@
 name = "polypaging"
 version = "0.1.0"
 edition = "2021"
+description = "A Rust crate designed to make sending Poly™ Multicast pages easy"
+authors = ["Michael Englehorn"]
+repository = "https://github.com/K0HAX/polypaging/"
+license = "MIT"
+categories = ["network-programming"]
 
 [lib]
 #crate-type = ["dylib"]

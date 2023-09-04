@@ -1,6 +1,6 @@
 [package]
 name = "polypaging"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Rust crate designed to make sending Poly™ Multicast pages easy"
 authors = ["Michael Englehorn"]

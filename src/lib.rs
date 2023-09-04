@@ -86,7 +86,7 @@ impl std::fmt::Display for CodecFlag {
 /// This information doesn't change during a session, so we can pass it by ref to other functions
 /// in this library
 #[derive(Copy, Clone)]
-struct SessionInfo<'a> {
+pub struct SessionInfo<'a> {
     channelnum: u8,
     hostserial: u32,
     callerid_len: u8,
@@ -348,7 +348,7 @@ fn transform_u32_to_u8_array(x: u32) -> [u8; 4] {
 }
 
 /// Helper function to get a new SessionInfo object
-fn get_session(
+pub fn get_session(
     channel_num: u8,
     host_serial: u32,
     caller_id: &str,
@@ -454,6 +454,55 @@ fn get_payload_packets(
     }
 
     Ok(result)
+}
+
+/// Public function to get the alert packet as array of bytes.
+pub fn get_alert_packets(session: &SessionInfo) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let alert: PacketNoPayload = get_alert(*session);
+    alert.to_bytes()
+}
+
+/// Public functinon to get the end packet as an array of bytes.
+pub fn get_end_packets(session: &SessionInfo) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let end_packet: PacketNoPayload = get_end(*session);
+    end_packet.to_bytes()
+}
+
+/// Public function to get a single payload packet as an array of bytes.
+/// Takes the payload as a [u8; 80], aka, an 80 byte array
+/// Must also include the last chunk of payload. On the first packet, the last_chunk must equal the payload_chunk
+pub fn get_payload_packet(
+    session: &SessionInfo,
+    payload_chunk: &[u8; 80],
+    last_chunk: &[u8; 80],
+    codec: CodecFlag,
+    flags: u8,
+    sample_count: &mut u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut result: Vec<PacketWithPayload> = Vec::new();
+    let mut this_payload: Vec<u8> = Vec::new();
+    let mut packet_payload: Vec<u8> = Vec::new();
+    let mut tmp_last_chunk: Vec<u8> = last_chunk.to_vec();
+    this_payload.append(&mut tmp_last_chunk);
+    this_payload.append(&mut packet_payload.clone());
+    let rtp_payload = RtpPayload {
+        data: this_payload.clone(),
+    };
+    *sample_count += 160u32;
+    let payload_packet = PacketWithPayload {
+        opcode: OpCode::Transmit,
+        session: session.clone(),
+        codec: codec,
+        flags: flags,
+        samplecount: *sample_count,
+        payload: rtp_payload,
+    };
+    result.push(payload_packet);
+    for n in 0..payload_chunk.len() {
+        let this_byte: u8 = payload_chunk[n];
+        packet_payload.push(this_byte);
+    }
+    result[0].to_bytes()
 }
 
 /// Public function to println!() (mostly) what the do_transmit function would do, but don't actually
@@ -601,6 +650,16 @@ mod tests {
     }
 
     #[test]
+    fn good_alert_packet() {
+        let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
+        let result = get_alert_packets(&session).unwrap();
+        assert_eq!(
+            result,
+            [15, 49, 0, 0, 0, 0, 13, 67, 97, 108, 108, 101, 114, 73, 68, 0, 0, 0, 0, 0]
+        )
+    }
+
+    #[test]
     fn good_end() {
         let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
         let result = get_end(session);
@@ -610,6 +669,16 @@ mod tests {
         assert_eq!(result.session.callerid_len, 13u8);
         assert_eq!(result.session.callerid, "CallerID");
         assert!(matches!(result.opcode, OpCode::End));
+    }
+
+    #[test]
+    fn good_end_packet() {
+        let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
+        let result = get_end_packets(&session).unwrap();
+        assert_eq!(
+            result,
+            [255, 49, 0, 0, 0, 0, 13, 67, 97, 108, 108, 101, 114, 73, 68, 0, 0, 0, 0, 0]
+        )
     }
 
     #[test]
@@ -626,6 +695,27 @@ mod tests {
         // 0x09 = G722
         // 0x000000 = flags
         // 0xA0 = 160 (sample)
+        let check_bytes: Vec<u8> = b"\x10\x31\x00\x00\x00\x00\x0dCallerID\x00\x00\x00\x00\x00\x09\x00\x00\x00\x00\xA0\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7".to_vec();
+        assert_eq!(result, check_bytes);
+    }
+
+    #[test]
+    fn good_payload_packet() {
+        let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
+        let payload_chunk: [u8; 80] = *b"\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7";
+        let last_chunk: [u8; 80] = *b"\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7";
+        let codec = CodecFlag::G722;
+        let flags: u8 = 0u8;
+        let mut sample_count: u32 = 0u32;
+        let result = get_payload_packet(
+            &session,
+            &payload_chunk,
+            &last_chunk,
+            codec,
+            flags,
+            &mut sample_count,
+        )
+        .unwrap();
         let check_bytes: Vec<u8> = b"\x10\x31\x00\x00\x00\x00\x0dCallerID\x00\x00\x00\x00\x00\x09\x00\x00\x00\x00\xA0\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7".to_vec();
         assert_eq!(result, check_bytes);
     }

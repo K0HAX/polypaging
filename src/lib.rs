@@ -9,8 +9,8 @@ use tokio::net::UdpSocket;
 // Begin RTP Specific Code //
 /// Array of bytes that make up the raw RTP payload
 #[derive(Clone)]
-struct RtpPayload {
-    data: Vec<u8>,
+pub struct RtpPayload {
+    pub data: Vec<u8>,
 }
 
 impl std::fmt::UpperHex for RtpPayload {
@@ -87,22 +87,22 @@ impl std::fmt::Display for CodecFlag {
 /// in this library
 #[derive(Copy, Clone)]
 pub struct SessionInfo<'a> {
-    channelnum: u8,
-    hostserial: u32,
-    callerid_len: u8,
-    callerid: &'a str,
+    pub channelnum: u8,
+    pub hostserial: u32,
+    pub callerid_len: u8,
+    pub callerid: &'a str,
 }
 
 /// Header and trailer packets in-memory representation
 #[derive(Copy, Clone)]
-struct PacketNoPayload<'a> {
+pub struct PacketNoPayload<'a> {
     opcode: OpCode,
     session: SessionInfo<'a>,
 }
 
 /// Payload packets in-memory representation
 #[derive(Clone)]
-struct PacketWithPayload<'a> {
+pub struct PacketWithPayload<'a> {
     opcode: OpCode,
     session: SessionInfo<'a>,
     codec: CodecFlag,
@@ -112,7 +112,7 @@ struct PacketWithPayload<'a> {
 }
 
 /// Packets both with and without a payload must implement these traits
-trait Packet {
+pub trait Packet {
     fn print(&self) -> Result<(), Box<dyn std::error::Error>>;
     fn debug(&self);
     fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
@@ -322,6 +322,10 @@ impl FileBytes {
             Err(error) => return Err(error),
         }
     }
+
+    pub fn from_bytes(data: Vec<u8>) -> Result<FileBytes, std::io::Error> {
+        Ok(FileBytes { contents: data })
+    }
 }
 
 impl std::fmt::UpperHex for FileBytes {
@@ -366,7 +370,7 @@ pub fn get_session(
 }
 
 /// Helper function to get a new PacketNoPayload object for the "Alert" OpCode
-fn get_alert(session: SessionInfo) -> PacketNoPayload {
+pub fn get_alert(session: SessionInfo) -> PacketNoPayload {
     PacketNoPayload {
         opcode: OpCode::Alert,
         session: session,
@@ -374,7 +378,7 @@ fn get_alert(session: SessionInfo) -> PacketNoPayload {
 }
 
 /// Helper function to get a new PacketNoPayload object for the "End" OpCode
-fn get_end(session: SessionInfo) -> PacketNoPayload {
+pub fn get_end(session: SessionInfo) -> PacketNoPayload {
     PacketNoPayload {
         opcode: OpCode::End,
         session: session,
@@ -384,7 +388,7 @@ fn get_end(session: SessionInfo) -> PacketNoPayload {
 /// Helper function to get an array of PacketWithPayload(s) to transmit the payload_bytes
 /// this function splits the payload_bytes into 80 byte chunks and orders them appropriately for
 /// Poly phone consumption
-fn get_payload<'a>(
+pub fn get_payload<'a>(
     session: SessionInfo<'a>,
     codec: CodecFlag,
     flags: u8,
@@ -438,7 +442,7 @@ fn get_payload<'a>(
 
 /// Helper function to get an array of another array of bytes, from get_payload to transmit the
 /// actual packets rather than the internal representation of an array of PacketWithPayload(s)
-fn get_payload_packets(
+pub fn get_payload_packets(
     session: SessionInfo,
     codec: CodecFlag,
     flags: u8,

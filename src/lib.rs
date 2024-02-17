@@ -1,6 +1,7 @@
 use ascii;
 use clap::ValueEnum;
 use log;
+use std::io::BufRead;
 use std::net::Ipv4Addr;
 use std::str;
 use std::{process, thread, time};
@@ -305,6 +306,49 @@ impl Packet for PacketWithPayload<'_> {
     }
 }
 
+impl PacketWithPayload<'_> {
+    pub fn from_buffer<'a>(
+        session: SessionInfo<'a>,
+        codec: CodecFlag,
+        flags: u8,
+        sample_count: &mut u32,
+        mut last_chunk: Vec<u8>,
+        buffer: &[u8],
+    ) -> (Vec<u8>, PacketWithPayload<'a>) {
+        // read up to 80 bytes
+        let payload_len = buffer.len();
+        let mut this_payload: Vec<u8> = Vec::new();
+        let mut packet_payload: Vec<u8> = Vec::new();
+        if last_chunk.len() != 0 {
+            this_payload.append(&mut last_chunk.clone());
+        };
+
+        last_chunk.truncate(0);
+        log::debug!("Payload Length: {payload_len}");
+        assert!(payload_len <= 80);
+        for packet_byte in buffer {
+            packet_payload.push(packet_byte.clone());
+            this_payload.push(packet_byte.clone());
+        }
+        for packet in packet_payload.clone() {
+            last_chunk.push(packet);
+        }
+        let rtp_payload = RtpPayload {
+            data: this_payload.clone(),
+        };
+        *sample_count += 160u32;
+        let payload_packet = PacketWithPayload {
+            opcode: OpCode::Transmit,
+            session: session,
+            codec: codec,
+            flags: flags,
+            samplecount: *sample_count,
+            payload: rtp_payload,
+        };
+        (last_chunk, payload_packet)
+    }
+}
+
 // FileBytes //
 /// This object holds the actual data of a file in memory
 pub struct FileBytes {
@@ -559,6 +603,72 @@ pub fn do_print(file_bytes: &FileBytes, callerid: &str, codec: CodecFlag, channe
     }
 }
 
+pub fn do_print_stream<R: BufRead>(
+    file_handle: &mut R,
+    callerid: String,
+    codec: CodecFlag,
+    channel: u8,
+) {
+    let alert_gap = time::Duration::from_millis(30);
+    let tx_gap = time::Duration::from_millis(10);
+    let session: SessionInfo =
+        get_session(channel, 0x00000000u32, &callerid).unwrap_or_else(|err| {
+            println!("Problem getting session info: {err}");
+            process::exit(1);
+        });
+    let alert: PacketNoPayload = get_alert(session);
+    let end: PacketNoPayload = get_end(session);
+
+    /* Begin! */
+    for _ in 0..31 {
+        thread::sleep(alert_gap);
+        //let alert_printable: PrintableU8Vec = PrintableU8Vec(alert.to_bytes().unwrap());
+        //println!("{:02X}", alert_printable);
+        alert.print().unwrap_or_else(|err| {
+            println!("Problem printing alert: {err}");
+            process::exit(1);
+        });
+    }
+    ////////////////
+
+    /* Payload! */
+    let mut buffer = [0u8; 80];
+    let mut sample_count = 0u32;
+    let mut last_chunk: Vec<u8> = vec![];
+    loop {
+        let buf_len = file_handle.read(&mut buffer).unwrap();
+        if buf_len == 0 {
+            break;
+        }
+        let payload_packet: PacketWithPayload;
+        (last_chunk, payload_packet) = PacketWithPayload::from_buffer(
+            session,
+            codec,
+            0u8,
+            &mut sample_count,
+            last_chunk,
+            &buffer,
+        );
+        payload_packet.print().unwrap_or_else(|err| {
+            println!("Problem printing payload packet: {err}");
+            process::exit(1);
+        });
+        thread::sleep(tx_gap);
+    }
+    ////////////////
+
+    /* End! */
+    for _ in 0..12 {
+        thread::sleep(alert_gap);
+        //let end_printable: PrintableU8Vec = PrintableU8Vec(end.to_bytes().unwrap());
+        //println!("{:02X}", end_printable);
+        end.print().unwrap_or_else(|err| {
+            println!("Problem printing end packet: {err}");
+            process::exit(1);
+        });
+    }
+}
+
 /// Transmit a file, passed in as &FileBytes, to Poly phones via IP multicast. This function
 /// handles all parsing and timing, as well as IGMP setup to join the multicast group.
 pub async fn do_transmit(
@@ -586,6 +696,8 @@ pub async fn do_transmit(
 
     let sock = UdpSocket::bind("0.0.0.0:5001").await?;
     let remote_addr = "224.0.1.116:5001";
+    sock.set_multicast_ttl_v4(64)
+        .expect("set_multicast_ttl_v4 call failed");
     let v4_mcast_addr = Ipv4Addr::new(224, 0, 1, 116);
     let v4_local_addr = Ipv4Addr::new(0, 0, 0, 0);
     sock.connect(remote_addr).await?;
@@ -614,6 +726,80 @@ pub async fn do_transmit(
     ////////////////
 
     /* End! */
+    end.debug();
+    let end_bytes: Vec<u8> = end.to_bytes().unwrap_or_else(|err| {
+        println!("Problem getting end packet bytes: {err}");
+        process::exit(1);
+    });
+    for _ in 0..12 {
+        sock.send(&end_bytes).await?;
+        thread::sleep(alert_gap);
+    }
+    Ok(())
+}
+
+pub async fn do_transmit_stream<R: BufRead>(
+    file_handle: &mut R,
+    callerid: String,
+    codec: CodecFlag,
+    channel: u8,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let alert_gap = time::Duration::from_millis(30);
+    let join_gap = time::Duration::from_millis(500);
+    let tx_gap = time::Duration::from_millis(10);
+    let session: SessionInfo =
+        get_session(channel, 0x00000000u32, &callerid).unwrap_or_else(|err| {
+            println!("Problem getting session info: {err}");
+            process::exit(1);
+        });
+    let alert: PacketNoPayload = get_alert(session);
+    let end: PacketNoPayload = get_end(session);
+
+    let sock = UdpSocket::bind("0.0.0.0:5001").await?;
+    let remote_addr = "224.0.1.116:5001";
+    sock.set_multicast_ttl_v4(64)
+        .expect("set_multicast_ttl_v4 call failed");
+    let v4_mcast_addr = Ipv4Addr::new(224, 0, 1, 116);
+    let v4_local_addr = Ipv4Addr::new(0, 0, 0, 0);
+    sock.connect(remote_addr).await?;
+    sock.join_multicast_v4(v4_mcast_addr, v4_local_addr)?;
+
+    thread::sleep(join_gap);
+
+    let alert_bytes: Vec<u8> = alert.to_bytes().unwrap_or_else(|err| {
+        println!("Problem getting alert packet bytes: {err}");
+        process::exit(1);
+    });
+    alert.debug();
+    for _ in 0..31 {
+        sock.send(&alert_bytes).await?;
+        thread::sleep(alert_gap);
+    }
+
+    let mut buffer = [0u8; 80];
+    let mut sample_count = 0u32;
+    let mut last_chunk: Vec<u8> = Vec::new();
+    loop {
+        let buf_len = file_handle.read(&mut buffer).unwrap();
+        if buf_len == 0 {
+            break;
+        }
+        log::debug!("Buffer Length: {buf_len}");
+        let payload_packet: PacketWithPayload;
+        (last_chunk, payload_packet) = PacketWithPayload::from_buffer(
+            session,
+            codec,
+            0u8,
+            &mut sample_count,
+            last_chunk,
+            &buffer,
+        );
+        log::debug!("Sample Count: {sample_count}");
+        let payload_bytes: Vec<u8> = payload_packet.to_bytes().unwrap();
+        sock.send(&payload_bytes).await?;
+        thread::sleep(tx_gap);
+    }
+
     end.debug();
     let end_bytes: Vec<u8> = end.to_bytes().unwrap_or_else(|err| {
         println!("Problem getting end packet bytes: {err}");

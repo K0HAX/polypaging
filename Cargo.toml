@@ -1,6 +1,6 @@
 [package]
 name = "polypaging"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "A Rust crate designed to make sending Poly™ Multicast pages easy"
 authors = ["Michael Englehorn"]
@@ -17,3 +17,7 @@ byteorder = "1.4.3"
 clap = { version = "4.2.4", features = ["derive", "env", "unicode", "wrap_help"] }
 log = "0.4.17"
 tokio = { version = "1.27.0", features = ["full"] }
+
+[profile.release]
+strip = "symbols"
+

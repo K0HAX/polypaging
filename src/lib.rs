@@ -5,7 +5,6 @@ use crate::packet::{
 use crate::rtpcodec::CodecFlag;
 use crate::session::{get_session, SessionInfo};
 
-use log;
 use std::io::BufRead;
 use std::net::Ipv4Addr;
 use std::str;
@@ -38,7 +37,7 @@ impl FileBytes {
             Ok(filebytes) => Ok(FileBytes {
                 contents: filebytes,
             }),
-            Err(error) => return Err(error),
+            Err(error) => Err(error),
         }
     }
 
@@ -67,18 +66,16 @@ impl std::fmt::UpperHex for FileBytes {
 pub fn do_print(file_bytes: &FileBytes, callerid: &str, codec: CodecFlag, channel: u8) {
     let alert_gap = time::Duration::from_millis(30);
     let session: SessionInfo =
-        get_session(channel, 0x00000000u32, &callerid).unwrap_or_else(|err| {
+        get_session(channel, 0x00000000u32, callerid).unwrap_or_else(|err| {
             println!("Problem getting session info: {err}");
             process::exit(1);
         });
-    let alert: PacketNoPayload = get_alert(session);
-    let end: PacketNoPayload = get_end(session);
+    let alert: PacketNoPayload = get_alert(&session);
+    let end: PacketNoPayload = get_end(&session);
 
     /* Begin! */
     for _ in 0..31 {
         thread::sleep(alert_gap);
-        //let alert_printable: PrintableU8Vec = PrintableU8Vec(alert.to_bytes().unwrap());
-        //println!("{:02X}", alert_printable);
         alert.print().unwrap_or_else(|err| {
             println!("Problem printing alert: {err}");
             process::exit(1);
@@ -88,11 +85,9 @@ pub fn do_print(file_bytes: &FileBytes, callerid: &str, codec: CodecFlag, channe
 
     /* Payload! */
     let payload_packets: Vec<PacketWithPayload> =
-        get_payload(session, codec, 0u8, &file_bytes.contents);
+        get_payload(&session, codec, 0u8, &file_bytes.contents);
 
     for payload_packet in payload_packets {
-        //let payload_printable: PrintableU8Vec = PrintableU8Vec(payload_packet.clone());
-        //println!("{:02X}", payload_printable);
         payload_packet.print().unwrap_or_else(|err| {
             println!("Problem printing payload packet: {err}");
             process::exit(1);
@@ -103,8 +98,6 @@ pub fn do_print(file_bytes: &FileBytes, callerid: &str, codec: CodecFlag, channe
     /* End! */
     for _ in 0..12 {
         thread::sleep(alert_gap);
-        //let end_printable: PrintableU8Vec = PrintableU8Vec(end.to_bytes().unwrap());
-        //println!("{:02X}", end_printable);
         end.print().unwrap_or_else(|err| {
             println!("Problem printing end packet: {err}");
             process::exit(1);
@@ -125,14 +118,12 @@ pub fn do_print_stream<R: BufRead>(
             println!("Problem getting session info: {err}");
             process::exit(1);
         });
-    let alert: PacketNoPayload = get_alert(session);
-    let end: PacketNoPayload = get_end(session);
+    let alert: PacketNoPayload = get_alert(&session);
+    let end: PacketNoPayload = get_end(&session);
 
     /* Begin! */
     for _ in 0..31 {
         thread::sleep(alert_gap);
-        //let alert_printable: PrintableU8Vec = PrintableU8Vec(alert.to_bytes().unwrap());
-        //println!("{:02X}", alert_printable);
         alert.print().unwrap_or_else(|err| {
             println!("Problem printing alert: {err}");
             process::exit(1);
@@ -151,7 +142,7 @@ pub fn do_print_stream<R: BufRead>(
         }
         let payload_packet: PacketWithPayload;
         (last_chunk, payload_packet) = PacketWithPayload::from_buffer(
-            session,
+            &session,
             codec,
             0u8,
             &mut sample_count,
@@ -169,8 +160,6 @@ pub fn do_print_stream<R: BufRead>(
     /* End! */
     for _ in 0..12 {
         thread::sleep(alert_gap);
-        //let end_printable: PrintableU8Vec = PrintableU8Vec(end.to_bytes().unwrap());
-        //println!("{:02X}", end_printable);
         end.print().unwrap_or_else(|err| {
             println!("Problem printing end packet: {err}");
             process::exit(1);
@@ -194,11 +183,11 @@ pub async fn do_transmit(
             println!("Problem getting session info: {err}");
             process::exit(1);
         });
-    let alert: PacketNoPayload = get_alert(session);
-    let end: PacketNoPayload = get_end(session);
+    let alert: PacketNoPayload = get_alert(&session);
+    let end: PacketNoPayload = get_end(&session);
 
     let payload_packets: Vec<Vec<u8>> =
-        get_payload_packets(session, codec, 0u8, &file_bytes.contents).unwrap_or_else(|err| {
+        get_payload_packets(&session, codec, 0u8, &file_bytes.contents).unwrap_or_else(|err| {
             println!("Problem generating payload packets: {err}");
             process::exit(1);
         });
@@ -228,8 +217,7 @@ pub async fn do_transmit(
 
     /* Payload! */
     for payload_packet in payload_packets {
-        let payload_bytes: Vec<u8> = payload_packet.clone();
-        sock.send(&payload_bytes).await?;
+        sock.send(&payload_packet).await?;
         thread::sleep(tx_gap);
     }
     ////////////////
@@ -261,8 +249,8 @@ pub async fn do_transmit_stream<R: BufRead>(
             println!("Problem getting session info: {err}");
             process::exit(1);
         });
-    let alert: PacketNoPayload = get_alert(session);
-    let end: PacketNoPayload = get_end(session);
+    let alert: PacketNoPayload = get_alert(&session);
+    let end: PacketNoPayload = get_end(&session);
 
     let sock = UdpSocket::bind("0.0.0.0:5001").await?;
     let remote_addr = "224.0.1.116:5001";
@@ -296,7 +284,7 @@ pub async fn do_transmit_stream<R: BufRead>(
         log::debug!("Buffer Length: {buf_len}");
         let payload_packet: PacketWithPayload;
         (last_chunk, payload_packet) = PacketWithPayload::from_buffer(
-            session,
+            &session,
             codec,
             0u8,
             &mut sample_count,
@@ -339,7 +327,7 @@ mod tests {
     #[test]
     fn good_alert() {
         let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
-        let result = get_alert(session);
+        let result = get_alert(&session);
 
         assert_eq!(result.session.channelnum, 49u8);
         assert_eq!(result.session.hostserial, 0x00000000u32);
@@ -361,7 +349,7 @@ mod tests {
     #[test]
     fn good_end() {
         let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
-        let result = get_end(session);
+        let result = get_end(&session);
 
         assert_eq!(result.session.channelnum, 49u8);
         assert_eq!(result.session.hostserial, 0x00000000u32);
@@ -384,7 +372,7 @@ mod tests {
     fn good_payload() {
         let session = get_session(49u8, 0x00000000u32, "CallerID").unwrap();
         let payload: Vec<u8> = b"\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7\x00".to_vec();
-        let result_packet = crate::packet::get_payload(session, CodecFlag::G722, 0u8, &payload);
+        let result_packet = crate::packet::get_payload(&session, CodecFlag::G722, 0u8, &payload);
         let result = result_packet[0].to_bytes().unwrap();
         // 0x10 = Transmit
         // 0x31 = channel 49
@@ -424,7 +412,7 @@ mod tests {
     fn bad_callerid() {
         let session = get_session(49u8, 0x00000000u32, "CallerID12345678").unwrap();
         let payload: Vec<u8> = b"\xDE\x7A\xF2\x77\xDC\xF2\xF5\xDB\x71\xDE\xB2\xAF\xB9\xB4\x9F\x9D\xF6\xF3\xED\x72\xF2\xAE\xB6\xF6\xF9\xF7\xDC\xDE\xF8\x7E\xF4\xB1\xBA\xF7\xDC\xDE\x76\xF8\xB1\xF4\xFA\xF7\xBA\xDE\xFC\xFA\xDE\xF8\xBC\x7E\xB6\xDE\xF3\xF6\xF4\xFC\xF6\xB2\xF6\x74\xDB\xBE\x9B\xDE\x7A\xDE\xFA\xB7\xF7\x7A\xB7\xFC\xF7\xFE\xFA\x76\xB7\xF6\xF7\xF7\x00".to_vec();
-        let result_packet = crate::packet::get_payload(session, CodecFlag::G722, 0u8, &payload);
+        let result_packet = crate::packet::get_payload(&session, CodecFlag::G722, 0u8, &payload);
         let result = result_packet[0].to_bytes().unwrap();
         // 0x10 = Transmit
         // 0x31 = channel 49

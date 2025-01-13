@@ -8,14 +8,14 @@ use ascii;
 #[derive(Copy, Clone)]
 pub struct PacketNoPayload<'a> {
     pub(crate) opcode: OpCode,
-    pub(crate) session: SessionInfo<'a>,
+    pub(crate) session: &'a SessionInfo<'a>,
 }
 
 /// Payload packets in-memory representation
 #[derive(Clone)]
 pub struct PacketWithPayload<'a> {
     pub(crate) opcode: OpCode,
-    pub(crate) session: SessionInfo<'a>,
+    pub(crate) session: &'a SessionInfo<'a>,
     pub(crate) codec: CodecFlag,
     pub(crate) flags: u8,
     pub(crate) samplecount: u32,
@@ -54,13 +54,11 @@ impl Packet for PacketNoPayload<'_> {
             Err(error) => return Err(Box::new(error)),
         };
         let mut callerid_bytes: [u8; 13] = [0; 13];
-        let mut i = 0;
         if callerid_ascii.len() > 13 {
             return Err(Box::new(CallerIdLength));
         }
-        for b in callerid_ascii.as_bytes() {
+        for (i, b) in callerid_ascii.as_bytes().iter().enumerate() {
             callerid_bytes[i] = *b;
-            i = i + 1;
         }
         println!("OpCode           : {}", self.opcode);
         println!("Channel Number   : {}", self.session.channelnum);
@@ -87,9 +85,7 @@ impl Packet for PacketNoPayload<'_> {
         let mut value: Vec<u8> = Vec::new();
         value.push(self.opcode.to_u8());
         value.push(self.session.channelnum);
-        for serial_byte in transform_u32_to_u8_array(self.session.hostserial) {
-            value.push(serial_byte);
-        }
+        value.extend_from_slice(&transform_u32_to_u8_array(self.session.hostserial));
         value.push(self.session.callerid_len);
         let callerid_ascii_result: Result<&ascii::AsciiStr, ascii::AsAsciiStrError> =
             ascii::AsciiStr::from_ascii(self.session.callerid);
@@ -98,17 +94,13 @@ impl Packet for PacketNoPayload<'_> {
             Err(error) => return Err(Box::new(error)),
         };
         let mut callerid_bytes: [u8; 13] = [0; 13];
-        let mut i = 0;
         if callerid_ascii.len() > 13 {
             return Err(Box::new(CallerIdLength));
         }
-        for b in callerid_ascii.as_bytes() {
+        for (i, b) in callerid_ascii.as_bytes().iter().enumerate() {
             callerid_bytes[i] = *b;
-            i = i + 1;
         }
-        for callerid_byte in &callerid_bytes {
-            value.push(*callerid_byte);
-        }
+        value.extend_from_slice(&callerid_bytes);
         // End Caller ID //
 
         Ok(value)
@@ -126,13 +118,11 @@ impl Packet for PacketWithPayload<'_> {
             Err(error) => return Err(Box::new(error)),
         };
         let mut callerid_bytes: [u8; 13] = [0; 13];
-        let mut i = 0;
         if callerid_ascii.len() > 13 {
             return Err(Box::new(CallerIdLength));
         }
-        for b in callerid_ascii.as_bytes() {
+        for (i, b) in callerid_ascii.as_bytes().iter().enumerate() {
             callerid_bytes[i] = *b;
-            i = i + 1;
         }
         println!("OpCode           : {}", self.opcode);
         println!("Channel Number   : {}", self.session.channelnum);
@@ -167,9 +157,7 @@ impl Packet for PacketWithPayload<'_> {
         let mut value: Vec<u8> = Vec::new();
         value.push(self.opcode.to_u8());
         value.push(self.session.channelnum);
-        for serial_byte in transform_u32_to_u8_array(self.session.hostserial) {
-            value.push(serial_byte);
-        }
+        value.extend_from_slice(&transform_u32_to_u8_array(self.session.hostserial));
         value.push(self.session.callerid_len);
         let callerid_ascii_result: Result<&ascii::AsciiStr, ascii::AsAsciiStrError> =
             ascii::AsciiStr::from_ascii(self.session.callerid);
@@ -178,25 +166,17 @@ impl Packet for PacketWithPayload<'_> {
             Err(error) => return Err(Box::new(error)),
         };
         let mut callerid_bytes: [u8; 13] = [0; 13];
-        let mut i = 0;
         if callerid_ascii.len() > 13 {
             return Err(Box::new(CallerIdLength));
         }
-        for b in callerid_ascii.as_bytes() {
+        for (i, b) in callerid_ascii.as_bytes().iter().enumerate() {
             callerid_bytes[i] = *b;
-            i = i + 1;
         }
-        for callerid_byte in &callerid_bytes {
-            value.push(*callerid_byte);
-        }
+        value.extend_from_slice(&callerid_bytes);
         value.push(self.codec.to_u8());
         value.push(self.flags);
-        for sample_byte in transform_u32_to_u8_array(self.samplecount) {
-            value.push(sample_byte);
-        }
-        for payload_byte in self.payload.data.clone() {
-            value.push(payload_byte);
-        }
+        value.extend_from_slice(&transform_u32_to_u8_array(self.samplecount));
+        value.extend_from_slice(&self.payload.data);
 
         Ok(value)
     }
@@ -204,7 +184,7 @@ impl Packet for PacketWithPayload<'_> {
 
 impl PacketWithPayload<'_> {
     pub fn from_buffer<'a>(
-        session: SessionInfo<'a>,
+        session: &'a SessionInfo<'a>,
         codec: CodecFlag,
         flags: u8,
         sample_count: &mut u32,
@@ -215,29 +195,27 @@ impl PacketWithPayload<'_> {
         let payload_len = buffer.len();
         let mut this_payload: Vec<u8> = Vec::new();
         let mut packet_payload: Vec<u8> = Vec::new();
-        if last_chunk.len() != 0 {
+        if !last_chunk.is_empty() {
             this_payload.append(&mut last_chunk.clone());
         };
 
         last_chunk.truncate(0);
         log::debug!("Payload Length: {payload_len}");
         assert!(payload_len <= 80);
-        for packet_byte in buffer {
-            packet_payload.push(packet_byte.clone());
-            this_payload.push(packet_byte.clone());
-        }
-        for packet in packet_payload.clone() {
-            last_chunk.push(packet);
-        }
+        packet_payload.extend_from_slice(&buffer);
+        this_payload.extend_from_slice(&buffer);
+        last_chunk.extend_from_slice(&packet_payload);
+
         let rtp_payload = RtpPayload {
             data: this_payload.clone(),
         };
+
         *sample_count += 160u32;
         let payload_packet = PacketWithPayload {
             opcode: OpCode::Transmit,
-            session: session,
-            codec: codec,
-            flags: flags,
+            session,
+            codec,
+            flags,
             samplecount: *sample_count,
             payload: rtp_payload,
         };
@@ -251,23 +229,23 @@ fn transform_u32_to_u8_array(x: u32) -> [u8; 4] {
     let b2: u8 = ((x >> 16) & 0xff) as u8;
     let b3: u8 = ((x >> 8) & 0xff) as u8;
     let b4: u8 = (x & 0xff) as u8;
-    return [b1, b2, b3, b4];
+    [b1, b2, b3, b4]
 }
 
 // Begin Functions //
 /// Helper function to get a new PacketNoPayload object for the "Alert" OpCode
-pub fn get_alert(session: SessionInfo) -> PacketNoPayload {
+pub fn get_alert<'a>(session: &'a SessionInfo) -> PacketNoPayload<'a> {
     PacketNoPayload {
         opcode: OpCode::Alert,
-        session: session,
+        session,
     }
 }
 
 /// Helper function to get a new PacketNoPayload object for the "End" OpCode
-pub fn get_end(session: SessionInfo) -> PacketNoPayload {
+pub fn get_end<'a>(session: &'a SessionInfo) -> PacketNoPayload<'a> {
     PacketNoPayload {
         opcode: OpCode::End,
-        session: session,
+        session,
     }
 }
 
@@ -275,10 +253,10 @@ pub fn get_end(session: SessionInfo) -> PacketNoPayload {
 /// this function splits the payload_bytes into 80 byte chunks and orders them appropriately for
 /// Poly phone consumption
 pub fn get_payload<'a>(
-    session: SessionInfo<'a>,
+    session: &'a SessionInfo<'a>,
     codec: CodecFlag,
     flags: u8,
-    payload_bytes: &Vec<u8>,
+    payload_bytes: &[u8],
 ) -> Vec<PacketWithPayload<'a>> {
     let mut result: Vec<PacketWithPayload> = Vec::new();
 
@@ -291,27 +269,24 @@ pub fn get_payload<'a>(
     let mut sample_count = 0u32;
     let mut this_payload: Vec<u8> = Vec::new();
     let mut packet_payload: Vec<u8> = Vec::new();
-    for n in 0..payload_len {
-        let this_byte: u8 = payload_bytes[n];
+    for (n, this_byte) in payload_bytes.iter().enumerate().take(payload_len) {
         if n % 80 == 0 {
             if n != 0 {
                 this_payload.truncate(0);
-                if last_chunk.len() != 0 {
+                if !last_chunk.is_empty() {
                     this_payload.append(&mut last_chunk);
                 };
                 this_payload.append(&mut packet_payload.clone());
                 last_chunk.truncate(0);
-                for packet in packet_payload.clone() {
-                    last_chunk.push(packet);
-                }
+                last_chunk.extend_from_slice(&packet_payload);
                 let rtp_payload = RtpPayload {
                     data: this_payload.clone(),
                 };
                 let payload_packet = PacketWithPayload {
                     opcode: OpCode::Transmit,
-                    session: session,
-                    codec: codec,
-                    flags: flags,
+                    session,
+                    codec,
+                    flags,
                     samplecount: sample_count,
                     payload: rtp_payload,
                 };
@@ -320,7 +295,7 @@ pub fn get_payload<'a>(
             packet_payload.truncate(0);
             sample_count += 160u32;
         }
-        packet_payload.push(this_byte);
+        packet_payload.push(*this_byte);
     }
 
     result
@@ -329,18 +304,17 @@ pub fn get_payload<'a>(
 /// Helper function to get an array of another array of bytes, from get_payload to transmit the
 /// actual packets rather than the internal representation of an array of PacketWithPayload(s)
 pub fn get_payload_packets(
-    session: SessionInfo,
+    session: &SessionInfo,
     codec: CodecFlag,
     flags: u8,
-    data: &Vec<u8>,
+    data: &[u8],
 ) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
     let mut result: Vec<Vec<u8>> = Vec::new();
 
     let payload_packets: Vec<PacketWithPayload> = get_payload(session, codec, flags, data);
 
     for packet_result in payload_packets {
-        let t_bytes = packet_result.to_bytes()?;
-        result.push(t_bytes);
+        result.push(packet_result.to_bytes()?);
     }
 
     Ok(result)
@@ -348,13 +322,13 @@ pub fn get_payload_packets(
 
 /// Public function to get the alert packet as array of bytes.
 pub fn get_alert_packets(session: &SessionInfo) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let alert: PacketNoPayload = get_alert(*session);
+    let alert: PacketNoPayload = get_alert(session);
     alert.to_bytes()
 }
 
 /// Public functinon to get the end packet as an array of bytes.
 pub fn get_end_packets(session: &SessionInfo) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let end_packet: PacketNoPayload = get_end(*session);
+    let end_packet: PacketNoPayload = get_end(session);
     end_packet.to_bytes()
 }
 
@@ -381,16 +355,13 @@ pub fn get_payload_packet(
     *sample_count += 160u32;
     let payload_packet = PacketWithPayload {
         opcode: OpCode::Transmit,
-        session: session.clone(),
-        codec: codec,
-        flags: flags,
+        session,
+        codec,
+        flags,
         samplecount: *sample_count,
         payload: rtp_payload,
     };
     result.push(payload_packet);
-    for n in 0..payload_chunk.len() {
-        let this_byte: u8 = payload_chunk[n];
-        packet_payload.push(this_byte);
-    }
+    packet_payload.extend_from_slice(payload_chunk);
     result[0].to_bytes()
 }

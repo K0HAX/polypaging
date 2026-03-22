@@ -8,11 +8,11 @@ pub struct SessionInfo<'a> {
 }
 
 /// Helper function to get a new SessionInfo object
-pub fn get_session(
+pub fn get_session<'a>(
     channel_num: u8,
     host_serial: u32,
-    caller_id: &str,
-) -> Result<SessionInfo, Box<dyn std::error::Error>> {
+    caller_id: &'a str,
+) -> Result<SessionInfo<'a>, Box<dyn std::error::Error>> {
     let callerid_len = 13u8;
     //if (channel_num > 50) || (channel_num < 1) {
     if !(1..=50).contains(&channel_num) {

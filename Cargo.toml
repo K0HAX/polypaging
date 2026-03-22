@@ -1,6 +1,6 @@
 [package]
 name = "polypaging"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "A Rust crate designed to make sending Poly™ Multicast pages easy"
 authors = ["Michael Englehorn"]
@@ -13,10 +13,10 @@ categories = ["network-programming"]
 
 [dependencies]
 ascii = "1.1.0"
-byteorder = "1.4.3"
-clap = { version = "4.2.4", features = ["derive", "env", "unicode", "wrap_help"] }
-log = "0.4.17"
-tokio = { version = "1.27.0", features = ["full"] }
+byteorder = "1.5.0"
+clap = { version = "4.6.0", features = ["derive", "env", "unicode", "wrap_help"] }
+log = "0.4.29"
+tokio = { version = "1.50.0", features = ["full"] }
 
 [profile.release]
 strip = "symbols"
